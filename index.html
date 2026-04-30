@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -1579,6 +1579,16 @@ td{padding:7px 10px;font-size:11.5px;white-space:nowrap;vertical-align:middle;}
       </div>
     </div>
 
+    <!-- Validades -->
+    <div style="margin-top:10px;">
+      <div style="font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+        <span>📅 Datas de validade dos lotes</span>
+        <button type="button" onclick="epAdicionarVal()" style="font-size:10px;background:var(--blue-a);border:1px solid rgba(74,143,245,.3);border-radius:4px;color:var(--blue);padding:2px 8px;cursor:pointer;font-family:'Inter',sans-serif;">＋ Adicionar</button>
+      </div>
+      <div id="ep-val-lista" style="display:flex;flex-direction:column;gap:5px;"></div>
+      <div class="fhint">Deixe em branco se o produto não tem validade. Formato: DD/MM/AAAA</div>
+    </div>
+
     <div class="m-foot">
       <button class="mbtn mbtn-cancel" onclick="closeEditModal()">Cancelar</button>
       <button class="mbtn mbtn-ok" id="ep-ok" onclick="salvarProduto()">Salvar produto</button>
@@ -2283,6 +2293,29 @@ function openModal(tipo){
   setTimeout(()=>$('m-prod').focus(),80);
 }
 
+function epAdicionarVal(valor='') {
+  const lista = document.getElementById('ep-val-lista');
+  if (!lista) return;
+  const idx = lista.children.length;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:6px;align-items:center;';
+  div.innerHTML = `
+    <input class="fi2" type="text" data-ep-val="${idx}" placeholder="DD/MM/AAAA"
+      style="flex:1;" maxlength="10" value="${valor}"
+      oninput="formatarDataVal(this)">
+    <button type="button" onclick="this.parentElement.remove()"
+      style="background:var(--red-a);border:1px solid rgba(224,72,74,.3);border-radius:4px;color:var(--red);padding:2px 8px;cursor:pointer;font-size:12px;flex-shrink:0;">✕</button>
+  `;
+  lista.appendChild(div);
+  if (!valor) div.querySelector('input')?.focus();
+}
+
+function epGetValidadesList() {
+  return [...document.querySelectorAll('[data-ep-val]')]
+    .map(i => i.value.trim())
+    .filter(v => v.length === 10);
+}
+
 function adicionarCampoVal() {
   const lista = $('m-val-lista');
   if (!lista) return;
@@ -2505,6 +2538,7 @@ function openEditModal(cod) {
     document.getElementById('ep-repo').value = '2';
     document.getElementById('ep-custo').value = '';
     document.getElementById('ep-consumo').value = '0.5';
+    document.getElementById('ep-val-lista').innerHTML = '';
   } else {
     const p = P.find(x => x.cod === cod);
     if (!p) return;
@@ -2520,6 +2554,9 @@ function openEditModal(cod) {
     document.getElementById('ep-repo').value = p.repo;
     document.getElementById('ep-custo').value = p.custo || '';
     document.getElementById('ep-consumo').value = p.consumo || '0.5';
+    // Carrega validades existentes
+    document.getElementById('ep-val-lista').innerHTML = '';
+    (p.val || []).forEach(v => epAdicionarVal(v));
   }
   document.getElementById('overlay-edit').classList.add('open');
   setTimeout(() => document.getElementById(isNovo ? 'ep-cod' : 'ep-nome').focus(), 80);
@@ -2542,13 +2579,14 @@ function salvarProduto() {
   const repo    = parseInt(document.getElementById('ep-repo').value) || 0;
   const custo   = parseFloat(document.getElementById('ep-custo').value) || 0;
   const consumo = parseFloat(document.getElementById('ep-consumo').value) || 0.5;
+  const validades = epGetValidadesList();
   if (!cod)  { toast('Informe o código do produto', 'error'); return; }
   if (!nome) { toast('Informe o nome do produto', 'error'); return; }
   if (!forn) { toast('Informe o fornecedor', 'error'); return; }
   const isNovo = _editCod === null;
   if (isNovo) {
     if (P.find(x => x.cod === cod)) { toast('Já existe um produto com esse código!', 'error'); return; }
-    P.push({ cod, nome, cat, forn, estoque, min, repo, custo, consumo, abc, val: [] });
+    P.push({ cod, nome, cat, forn, estoque, min, repo, custo, consumo, abc, val: validades });
     toast(`Produto "${nome}" criado com sucesso!`, 'success');
     registrarAudit('produto', `Produto criado: ${nome}`, `Cód: ${cod} | Cat: ${cat} | Forn: ${forn}`, '📦');
     if (typeof fbSalvarProduto === 'function') fbSalvarProduto(P[P.length-1]);
@@ -2557,8 +2595,9 @@ function salvarProduto() {
     if (!p) return;
     p.nome=nome; p.cat=cat; p.forn=forn; p.abc=abc;
     p.estoque=estoque; p.min=min; p.repo=repo; p.custo=custo; p.consumo=consumo;
+    p.val = validades; // Atualiza validades
     toast(`Produto "${nome}" atualizado!`, 'success');
-    registrarAudit('produto', `Produto editado: ${nome}`, `Cód: ${_editCod} | Est: ${estoque} | Custo: ${custo}`, '✏');
+    registrarAudit('produto', `Produto editado: ${nome}`, `Cód: ${_editCod} | Est: ${estoque} | Validades: ${validades.length}`, '✏');
     if (typeof fbSalvarProduto === 'function') fbSalvarProduto(p);
   }
   closeEditModal();
