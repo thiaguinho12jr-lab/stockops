@@ -4200,7 +4200,8 @@ function exportarHistoricoCSV() {
     });
   });
   downloadCSV('stockops_historico_pedidos.csv', '\uFEFF' + csv);
-}// ═══════════════════════════════════════════════════════════════
+}
+  // ═══════════════════════════════════════════════════════════════
 // MÓDULO: AUDITORIA — Histórico de todas as ações
 // ═══════════════════════════════════════════════════════════════
 let AUDIT = [];
@@ -4504,6 +4505,230 @@ function downloadCSV(nome, conteudo) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// MÓDULO: HISTÓRICO DE PEDIDOS DE COMPRA
+// ═══════════════════════════════════════════════════════════════
+let PEDIDOS = [];
+let _pedDetId = null;
+
+function salvarPedidoNoHistorico(solicitante, mensagemWpp) {
+  const agora = new Date();
+  const num = window._ultimoNumPedido || ('PC-' + Date.now().toString().slice(-6));
+  const total = CART.reduce((a, c) => a + (c.custo * c.qty || 0), 0);
+  const forns = [...new Set(CART.map(c => c.forn).filter(f => f && f !== '—'))];
+  const obs = ($('cart-obs')?.value || '').trim();
+  const itens = CART.map(c => ({
+    cod: c.cod, nome: c.nome, forn: c.forn,
+    qty: c.qty, custo: c.custo, livre: c.livre || false
+  }));
+  const pedido = {
+    id: 'ped_' + Date.now(),
+    num,
+    data: agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
+    dataISO: agora.toISOString(),
+    solicitante,
+    itens,
+    total,
+    fornecedores: forns,
+    obs,
+    mensagemWpp,
+    status: 'enviado',
+    criadoPor: CURRENT_USER?.nome || 'Sistema',
+    historicoStatus: [
+      { status: 'enviado', data: agora.toLocaleString('pt-BR'), por: CURRENT_USER?.nome || 'Sistema' }
+    ]
+  };
+  PEDIDOS.unshift(pedido);
+  if (typeof fbSalvarPedido === 'function') fbSalvarPedido(pedido);
+  registrarAudit('pedido', `Pedido ${num} criado`,
+    `${itens.length} itens · ${R(total)} · ${solicitante}`, '🛒');
+  CART = [];
+  if ($('cart-obs')) $('cart-obs').value = '';
+  if ($('cart-num')) $('cart-num').value = '';
+  renderCart();
+  renderHistBadge();
+  if (currentPage === 'historico') renderHistorico();
+}
+
+function renderHistBadge() {
+  const enviados = PEDIDOS.filter(p => p.status === 'enviado').length;
+  const nb = $('nb-hist');
+  if (!nb) return;
+  if (enviados > 0) {
+    nb.textContent = enviados;
+    nb.style.display = 'inline';
+  } else {
+    nb.style.display = 'none';
+  }
+}
+
+function renderHistorico() {
+  const fs = $('hist-filter-status')?.value || '';
+  const fu = $('hist-filter-user')?.value || '';
+  const fb = ($('hist-search')?.value || '').toLowerCase();
+  const sel = $('hist-filter-user');
+  if (sel) {
+    const users = [...new Set(PEDIDOS.map(p => p.solicitante))];
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Todos solicitantes</option>' +
+      users.map(u => `<option${cur===u?' selected':''}>${u}</option>`).join('');
+  }
+  const f = PEDIDOS.filter(p =>
+    (!fs || p.status === fs) &&
+    (!fu || p.solicitante === fu) &&
+    (!fb || p.num.toLowerCase().includes(fb))
+  );
+  if ($('hist-count')) $('hist-count').textContent = f.length + ' pedido' + (f.length!==1?'s':'');
+  const tbody = $('hist-tbody');
+  if (!tbody) return;
+  if (!f.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:32px;">
+      <div style="font-size:24px;margin-bottom:8px;">📭</div>
+      Nenhum pedido encontrado.<br>
+      <span style="font-size:10px;">Os pedidos aparecem aqui após serem enviados via WhatsApp.</span>
+    </td></tr>`;
+    return;
+  }
+  const statusBadge = (s) => {
+    if (s === 'enviado')   return `<span class="badge" style="background:rgba(232,160,32,.15);color:var(--yellow);border:1px solid rgba(232,160,32,.25);">📤 Enviado</span>`;
+    if (s === 'recebido')  return `<span class="badge b-ok">✅ Recebido</span>`;
+    if (s === 'cancelado') return `<span class="badge b-crit">❌ Cancelado</span>`;
+    return `<span class="badge b-info">${s}</span>`;
+  };
+  tbody.innerHTML = f.map(p => `<tr>
+    <td class="mono" style="color:var(--blue);font-size:11px;font-weight:600;">${p.num}</td>
+    <td class="mono" style="font-size:10px;color:var(--t3);">${p.data}</td>
+    <td style="font-weight:500;">${p.solicitante}</td>
+    <td style="text-align:center;font-weight:700;">${p.itens.length}</td>
+    <td style="font-size:10px;color:var(--t3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.fornecedores.join(', ') || '—'}</td>
+    <td style="text-align:right;font-weight:700;color:var(--green);">${p.total > 0 ? R(p.total) : '—'}</td>
+    <td>${statusBadge(p.status)}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn-edit" onclick="abrirPedidoDet('${p.id}')">👁 Ver</button>
+      ${p.status === 'enviado' ? `<button class="btn-edit" style="color:var(--green);border-color:rgba(45,184,122,.3);" onclick="marcarRecebido('${p.id}')">✅ Recebido</button>` : ''}
+    </td>
+  </tr>`).join('');
+}
+
+function abrirPedidoDet(id) {
+  const p = PEDIDOS.find(x => x.id === id);
+  if (!p) return;
+  _pedDetId = id;
+  $('pd-num').textContent = p.num;
+  $('pd-info').innerHTML = `
+    <div><b>📅 Data:</b> ${p.data}</div>
+    <div><b>👤 Solicitante:</b> ${p.solicitante}</div>
+    <div><b>🛒 Status:</b> ${p.status === 'enviado' ? '📤 Enviado' : p.status === 'recebido' ? '✅ Recebido' : '❌ Cancelado'}</div>
+    <div><b>📦 Total de itens:</b> ${p.itens.length} · <b>💰 Valor:</b> ${R(p.total)}</div>
+    ${p.fornecedores.length ? `<div><b>🏭 Fornecedores:</b> ${p.fornecedores.join(', ')}</div>` : ''}
+    ${p.historicoStatus && p.historicoStatus.length > 1 ? `<div style="margin-top:4px;border-top:1px solid var(--b1);padding-top:4px;font-size:10px;color:var(--t4);">Histórico: ${p.historicoStatus.map(h => `${h.status} (${h.data})`).join(' → ')}</div>` : ''}`;
+  $('pd-itens').innerHTML = p.itens.map((it, i) => `
+    <div style="display:flex;gap:8px;padding:6px 0;${i < p.itens.length-1 ? 'border-bottom:1px solid var(--b1);' : ''}align-items:center;">
+      <div style="width:20px;color:var(--t4);font-size:10px;">${i+1}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;font-weight:500;">${it.nome}${it.livre ? ' <span style="font-size:9px;background:var(--orange-a);color:var(--orange);padding:1px 5px;border-radius:3px;">livre</span>' : ''}</div>
+        <div style="font-size:9px;color:var(--t3);">${it.cod !== '—' ? it.cod + ' · ' : ''}${it.forn || '—'}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:12px;font-weight:700;color:var(--blue);">${it.qty} un</div>
+        ${it.custo > 0 ? `<div style="font-size:10px;color:var(--green);">${R(it.custo * it.qty)}</div>` : ''}
+      </div>
+    </div>`).join('');
+  if (p.obs) {
+    $('pd-obs-wrap').style.display = '';
+    $('pd-obs').textContent = p.obs;
+  } else {
+    $('pd-obs-wrap').style.display = 'none';
+  }
+  let actions = `<button class="mbtn mbtn-cancel" onclick="closePedidoDet()">Fechar</button>`;
+  if (p.status === 'enviado') {
+    actions += `<button class="mbtn mbtn-ok red" onclick="cancelarPedido('${p.id}')">❌ Cancelar pedido</button>`;
+    actions += `<button class="mbtn mbtn-ok green" onclick="marcarRecebido('${p.id}')">✅ Marcar como Recebido</button>`;
+  } else if (p.status === 'recebido') {
+    actions += `<button class="mbtn mbtn-ok" style="background:var(--yellow);border-color:var(--yellow);color:#000;" onclick="reabrirPedido('${p.id}')">↩ Reabrir como Enviado</button>`;
+  }
+  $('pd-actions').innerHTML = actions;
+  $('overlay-pedido-det').classList.add('open');
+}
+
+function closePedidoDet() {
+  $('overlay-pedido-det').classList.remove('open');
+  _pedDetId = null;
+}
+
+function marcarRecebido(id) {
+  const p = PEDIDOS.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Confirmar que o pedido ${p.num} foi RECEBIDO?\n\nIsso marca o pedido como concluído no histórico.`)) return;
+  p.status = 'recebido';
+  p.historicoStatus = p.historicoStatus || [];
+  p.historicoStatus.push({
+    status: 'recebido',
+    data: new Date().toLocaleString('pt-BR'),
+    por: CURRENT_USER?.nome || 'Sistema'
+  });
+  if (typeof fbSalvarPedido === 'function') fbSalvarPedido(p);
+  registrarAudit('pedido', `Pedido ${p.num} marcado como recebido`, `Por: ${CURRENT_USER?.nome}`, '✅');
+  closePedidoDet();
+  renderHistBadge();
+  renderHistorico();
+  toast(`Pedido ${p.num} marcado como recebido!`, 'success');
+  pushNotif('pedido', `Pedido ${p.num} recebido`, `Por: ${CURRENT_USER?.nome}`, '✅', 'ni-ok');
+}
+
+function cancelarPedido(id) {
+  const p = PEDIDOS.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Cancelar o pedido ${p.num}?\n\nO pedido ficará marcado como cancelado no histórico.`)) return;
+  p.status = 'cancelado';
+  p.historicoStatus = p.historicoStatus || [];
+  p.historicoStatus.push({
+    status: 'cancelado',
+    data: new Date().toLocaleString('pt-BR'),
+    por: CURRENT_USER?.nome || 'Sistema'
+  });
+  if (typeof fbSalvarPedido === 'function') fbSalvarPedido(p);
+  registrarAudit('pedido', `Pedido ${p.num} cancelado`, `Por: ${CURRENT_USER?.nome}`, '❌');
+  closePedidoDet();
+  renderHistBadge();
+  renderHistorico();
+  toast(`Pedido ${p.num} cancelado.`, 'success');
+}
+
+function reabrirPedido(id) {
+  const p = PEDIDOS.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Reabrir o pedido ${p.num} como Enviado?`)) return;
+  p.status = 'enviado';
+  p.historicoStatus = p.historicoStatus || [];
+  p.historicoStatus.push({
+    status: 'reaberto',
+    data: new Date().toLocaleString('pt-BR'),
+    por: CURRENT_USER?.nome || 'Sistema'
+  });
+  if (typeof fbSalvarPedido === 'function') fbSalvarPedido(p);
+  registrarAudit('pedido', `Pedido ${p.num} reaberto`, `Por: ${CURRENT_USER?.nome}`, '↩');
+  closePedidoDet();
+  renderHistBadge();
+  renderHistorico();
+  toast(`Pedido ${p.num} reaberto.`, 'success');
+}
+
+function exportarHistoricoCSV() {
+  if (!PEDIDOS.length) { toast('Nenhum pedido para exportar', 'error'); return; }
+  let csv = 'Nº Pedido,Data,Solicitante,Itens,Fornecedores,Valor Total,Status,Criado Por\n';
+  PEDIDOS.forEach(p => {
+    csv += `"${p.num}","${p.data}","${p.solicitante}",${p.itens.length},"${p.fornecedores.join('; ')}","${R(p.total)}","${p.status}","${p.criadoPor}"\n`;
+  });
+  csv += '\n\nDETALHAMENTO DE ITENS\nNº Pedido,Código,Produto,Fornecedor,Qtd,Custo Unit,Total\n';
+  PEDIDOS.forEach(p => {
+    p.itens.forEach(it => {
+      csv += `"${p.num}","${it.cod}","${it.nome}","${it.forn}",${it.qty},"${R(it.custo||0)}","${R((it.custo||0)*it.qty)}"\n`;
+    });
+  });
+  downloadCSV('stockops_historico_pedidos.csv', '\uFEFF' + csv);
+}
+  
+  // ═══════════════════════════════════════════════════════════════
 // INICIALIZAÇÃO FINAL
 // ═══════════════════════════════════════════════════════════════
 aplicarPrecosMimaki();
