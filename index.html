@@ -1740,6 +1740,10 @@ let SOLIC          = [];
 let _solicTipo     = 'entrada';
 let _solicIdCounter = 1;
 
+ // Histórico de Pedidos
+let PEDIDOS    = [];
+let _pedDetId  = null; 
+
 // Carrinho manual
 let CART      = [];
 let _cartIdCnt = 1;
@@ -4283,8 +4287,7 @@ function downloadCSV(nome, conteudo) {
 // ═══════════════════════════════════════════════════════════════
 // MÓDULO: HISTÓRICO DE PEDIDOS DE COMPRA
 // ═══════════════════════════════════════════════════════════════
-let PEDIDOS = [];
-let _pedDetId = null;
+
 
 function salvarPedidoNoHistorico(solicitante, mensagemWpp) {
   const agora = new Date();
