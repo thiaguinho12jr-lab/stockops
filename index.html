@@ -1047,6 +1047,30 @@
   </div>
 </div>
 
+<!-- MODAL HISTÓRICO DA MÁQUINA -->
+<div class="overlay" id="overlay-maq-hist" onclick="if(event.target===this)closeMaqHist()">
+  <div class="modal" style="width:640px;max-height:90vh;overflow-y:auto;">
+    <div class="m-head">
+      <div>
+        <div class="m-title" id="maq-hist-titulo">📜 Histórico</div>
+        <div id="maq-hist-sub" style="font-size:11px;color:var(--t3);margin-top:2px;"></div>
+      </div>
+      <button class="m-close" onclick="closeMaqHist()">✕</button>
+    </div>
+
+    <div style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--t4);font-weight:600;">Relatório de tintas</div>
+    <div id="maq-hist-tintas" style="margin-bottom:16px;"></div>
+
+    <div style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--t4);font-weight:600;">Linha do tempo</div>
+    <div id="maq-hist-timeline"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="nav-btn" onclick="closeMaqHist()">Fechar</button>
+      <button class="nav-btn primary" onclick="exportarMaqPDF(_maqHistAtual)">📄 Exportar PDF</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -4197,7 +4221,8 @@ function renderMaquinas(){
         ${_finalizadas.map(_itemFinal).join('')}
       </div>`:''}
       ${m.obs?`<div style="font-size:11px;color:var(--t3);border-top:1px solid var(--b2);padding-top:8px;white-space:pre-wrap;">${_escMaq(m.obs)}</div>`:''}
-      <div style="display:flex;gap:6px;margin-top:auto;padding-top:2px;">
+      <div style="display:flex;gap:6px;margin-top:auto;padding-top:2px;flex-wrap:wrap;">
+        <button class="btn-edit" onclick="openMaqHist('${m.id}')">📜 Histórico</button>
         <button class="btn-edit" onclick="openMaquinaModal('${m.id}')">✏ Editar</button>
         <button class="btn-del" onclick="excluirMaquina('${m.id}')">🗑 Excluir</button>
       </div>
@@ -4209,6 +4234,24 @@ function _fmtData(s){ if(!s) return '—'; const p=String(s).split('-'); return 
 function _parseData(s){ const p=String(s||'').split('-'); return p.length===3?new Date(+p[0],+p[1]-1,+p[2]):null; }
 function _diasDesde(inicio){ const d=_parseData(inicio); if(!d) return null; const n=new Date(); const hoje=new Date(n.getFullYear(),n.getMonth(),n.getDate()); return Math.max(0, Math.round((hoje-d)/86400000)); }
 function _duracaoDias(inicio,fim){ const di=_parseData(inicio), df=_parseData(fim); if(!di||!df) return null; return Math.max(0, Math.round((df-di)/86400000)); }
+
+let _tidSeq=0;
+function _novoTid(){ return 't'+Date.now().toString(36)+(_tidSeq++).toString(36); }
+let _maqHistAtual=null;
+
+// Registra um evento no histórico DA PRÓPRIA máquina (viaja junto, nunca é cortado)
+function _maqHistPush(m, acao, detalhe, icone){
+  if(!m.historico) m.historico=[];
+  const ag=new Date();
+  m.historico.push({
+    tsMs: ag.getTime(),
+    ts: ag.toLocaleDateString('pt-BR')+' '+ag.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
+    user: (CURRENT_USER&&CURRENT_USER.nome)||'Sistema',
+    acao: acao||'',
+    detalhe: detalhe||'',
+    icone: icone||'•'
+  });
+}
 
 function _tintaStatus(fim){
   if(!fim) return null;
@@ -4229,10 +4272,12 @@ function _maqTintasUI(){
   if(vazio) vazio.style.display=has?'none':'';
 }
 
-function maqAddTintaRow(modelo, inicio, validade, fim){
+function maqAddTintaRow(t){
+  t = t || {};
   const list=$('maq-tintas-list'); if(!list) return;
   const row=document.createElement('div');
   row.className='maq-tinta-row';
+  row.dataset.tid = t.tid || _novoTid();
   row.style.cssText='border:1px solid var(--b2);border-radius:var(--r6);padding:8px;margin-bottom:8px;';
   row.innerHTML=`
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
@@ -4254,12 +4299,13 @@ function maqAddTintaRow(modelo, inicio, validade, fim){
       </label>
     </div>`;
   list.appendChild(row);
-  if(modelo!=null) row.querySelector('.mt-modelo').value=modelo;
-  if(inicio) row.querySelector('.mt-inicio').value=inicio;
-  if(validade) row.querySelector('.mt-validade').value=validade;
-  if(fim) row.querySelector('.mt-acabou').value=fim;
+  const novo = !t.modelo;
+  if(t.modelo) row.querySelector('.mt-modelo').value=t.modelo;
+  if(t.inicio) row.querySelector('.mt-inicio').value=t.inicio;
+  if(t.validade) row.querySelector('.mt-validade').value=t.validade;
+  if(t.fim) row.querySelector('.mt-acabou').value=t.fim;
   _maqTintasUI();
-  if(modelo==null) row.querySelector('.mt-modelo').focus();
+  if(novo) row.querySelector('.mt-modelo').focus();
 }
 
 function openMaquinaModal(id){
@@ -4274,7 +4320,7 @@ function openMaquinaModal(id){
   } else {
     const m=MAQUINAS.find(x=>x.id===id); if(!m) return;
     $('maq-nome').value=m.nome||''; $('maq-modelo').value=m.modelo||''; $('maq-obs').value=m.obs||'';
-    (m.tintas||[]).forEach(t=>{ const o=(typeof t==='string')?{modelo:t}:t; maqAddTintaRow(o.modelo, o.inicio, o.validade, o.fim); });
+    (m.tintas||[]).forEach(t=>{ const o=(typeof t==='string')?{modelo:t}:t; maqAddTintaRow(o); });
   }
   _maqTintasUI();
   $('overlay-maquina').classList.add('open');
@@ -4288,6 +4334,7 @@ function salvarMaquina(){
   const nome=$('maq-nome').value.trim();
   const modelo=$('maq-modelo').value.trim();
   const tintas=[...document.querySelectorAll('#maq-tintas-list .maq-tinta-row')].map(r=>({
+    tid:r.dataset.tid||_novoTid(),
     modelo:r.querySelector('.mt-modelo').value.trim(),
     inicio:r.querySelector('.mt-inicio').value||'',
     validade:r.querySelector('.mt-validade').value||'',
@@ -4298,13 +4345,37 @@ function salvarMaquina(){
   if(!modelo){ toast('Informe o modelo da máquina.','error'); $('maq-modelo').focus(); return; }
   const isNew=_maqEditId===null;
   if(isNew){
-    const m={ id:'maq_'+Date.now(), nome, modelo, tintas, obs, criadoEm:new Date().toLocaleDateString('pt-BR') };
+    const m={ id:'maq_'+Date.now(), nome, modelo, tintas, obs, criadoEm:new Date().toLocaleDateString('pt-BR'), historico:[] };
+    _maqHistPush(m,'Máquina cadastrada',`Modelo: ${modelo}`,'🖨');
+    tintas.forEach(t=>_maqHistPush(m,`Tinta instalada: ${t.modelo}`, t.inicio?`Instalada em ${_fmtData(t.inicio)}`:'', '📥'));
     MAQUINAS.push(m);
     registrarAudit('sistema',`Máquina cadastrada: ${nome}`,`Modelo: ${modelo} | Tintas: ${tintas.map(t=>t.modelo).join(', ')||'—'}`,'🖨');
     if(typeof fbSalvarMaquina==='function') fbSalvarMaquina(m);
     toast(`Máquina "${nome}" cadastrada!`,'success');
   } else {
     const m=MAQUINAS.find(x=>x.id===_maqEditId); if(!m) return;
+    const antigas=(m.tintas||[]).map(t=> typeof t==='string'?{modelo:t}:t);
+    if(!m.historico) m.historico=[];
+    if((m.nome||'')!==nome||(m.modelo||'')!==modelo||(m.obs||'')!==obs){
+      _maqHistPush(m,'Dados editados',`${nome} · ${modelo}`,'✏');
+    }
+    const usadas=new Set();
+    tintas.forEach(nt=>{
+      let ot = nt.tid ? antigas.find(a=>a.tid===nt.tid && !usadas.has(a)) : null;
+      if(!ot) ot = antigas.find(a=>!usadas.has(a) && a.modelo===nt.modelo);
+      if(ot){
+        usadas.add(ot);
+        if(!ot.fim && nt.fim){
+          const d=_duracaoDias(nt.inicio,nt.fim);
+          _maqHistPush(m,`Tinta finalizada: ${nt.modelo}`, d!=null?`Durou ${d} dias (${_fmtData(nt.inicio)} → ${_fmtData(nt.fim)})`:`Acabou em ${_fmtData(nt.fim)}`,'🟥');
+        } else if((ot.inicio||'')!==(nt.inicio||'')||(ot.validade||'')!==(nt.validade||'')||(ot.fim||'')!==(nt.fim||'')){
+          _maqHistPush(m,`Tinta atualizada: ${nt.modelo}`,`inst. ${_fmtData(nt.inicio)} · val. ${_fmtData(nt.validade)} · acabou ${_fmtData(nt.fim)}`,'✏');
+        }
+      } else {
+        _maqHistPush(m,`Tinta instalada: ${nt.modelo}`, nt.inicio?`Instalada em ${_fmtData(nt.inicio)}`:'', '📥');
+      }
+    });
+    antigas.forEach(a=>{ if(!usadas.has(a)) _maqHistPush(m,`Tinta removida: ${a.modelo}`,'','🗑'); });
     m.nome=nome; m.modelo=modelo; m.tintas=tintas; m.obs=obs;
     registrarAudit('sistema',`Máquina editada: ${nome}`,`Modelo: ${modelo} | Tintas: ${tintas.map(t=>t.modelo).join(', ')||'—'}`,'✏');
     if(typeof fbSalvarMaquina==='function') fbSalvarMaquina(m);
@@ -4323,10 +4394,84 @@ function maqTintaAcabou(maqId, idx){
   t.fim=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
   if(!t.inicio) t.inicio=t.fim;
   const dur=_duracaoDias(t.inicio,t.fim);
+  _maqHistPush(m,`Tinta finalizada: ${t.modelo}`, dur!=null?`Durou ${dur} dias (${_fmtData(t.inicio)} → ${_fmtData(t.fim)})`:`Acabou em ${_fmtData(t.fim)}`,'🟥');
   registrarAudit('sistema',`Tinta finalizada: ${t.modelo}`,`Máquina: ${m.nome}${dur!=null?` | durou ${dur} dias`:''}`,'🖨');
   if(typeof fbSalvarMaquina==='function') fbSalvarMaquina(m);
   renderMaquinas();
   toast(`Tinta "${t.modelo}" marcada como acabada.`,'success');
+}
+
+function openMaqHist(maqId){
+  const m=MAQUINAS.find(x=>x.id===maqId); if(!m) return;
+  _maqHistAtual=maqId;
+  $('maq-hist-titulo').textContent='📜 '+m.nome;
+  $('maq-hist-sub').textContent=`${m.modelo||'—'} · criada em ${m.criadoEm||'—'}`;
+  const arr=(m.tintas||[]).map(t=> typeof t==='string'?{modelo:t}:t);
+  const ordered=[...arr.filter(t=>!t.fim), ...arr.filter(t=>t.fim)];
+  let linhas=ordered.map(t=>{
+    const dur=_duracaoDias(t.inicio,t.fim);
+    let status;
+    if(t.fim){ status=`<span style="color:var(--t3);">acabou · ${dur!=null?dur+'d':'—'}</span>`; }
+    else { const st=_tintaStatus(t.validade); status=st?`<span style="color:${st.fg};font-weight:600;">${st.txt}</span>`:'<span style="color:var(--t4);">em uso</span>'; }
+    return `<tr style="border-top:1px solid var(--b2);">
+      <td style="padding:5px 6px;font-weight:600;color:var(--t1);">${_escMaq(t.modelo)}</td>
+      <td style="padding:5px 6px;color:var(--t3);">${_fmtData(t.inicio)}</td>
+      <td style="padding:5px 6px;color:var(--t3);">${_fmtData(t.validade)}</td>
+      <td style="padding:5px 6px;color:var(--t3);">${_fmtData(t.fim)}</td>
+      <td style="padding:5px 6px;">${status}</td>
+    </tr>`;
+  }).join('');
+  if(!ordered.length) linhas=`<tr><td colspan="5" style="padding:8px 6px;color:var(--t4);">Nenhuma tinta cadastrada.</td></tr>`;
+  $('maq-hist-tintas').innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+    <thead><tr style="text-align:left;color:var(--t4);font-size:10px;text-transform:uppercase;">
+      <th style="padding:4px 6px;">Tinta</th><th style="padding:4px 6px;">Instalada</th><th style="padding:4px 6px;">Validade</th><th style="padding:4px 6px;">Acabou</th><th style="padding:4px 6px;">Duração / status</th>
+    </tr></thead><tbody>${linhas}</tbody></table>`;
+  const hist=[...(m.historico||[])].sort((a,b)=>(b.tsMs||0)-(a.tsMs||0));
+  $('maq-hist-timeline').innerHTML = hist.length ? hist.map(h=>`
+    <div style="display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--b2);">
+      <div style="font-size:15px;flex-shrink:0;width:22px;text-align:center;">${h.icone||'•'}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:var(--t1);font-weight:500;">${_escMaq(h.acao)}</div>
+        ${h.detalhe?`<div style="font-size:11px;color:var(--t3);">${_escMaq(h.detalhe)}</div>`:''}
+        <div style="font-size:10px;color:var(--t4);margin-top:1px;">${h.ts||''} · ${_escMaq(h.user||'—')}</div>
+      </div>
+    </div>`).join('') : '<div style="color:var(--t4);font-size:11px;padding:6px 0;">Sem histórico ainda. As próximas ações nesta máquina vão aparecer aqui.</div>';
+  $('overlay-maq-hist').classList.add('open');
+}
+
+function closeMaqHist(){ $('overlay-maq-hist').classList.remove('open'); }
+
+function exportarMaqPDF(maqId){
+  const m=MAQUINAS.find(x=>x.id===maqId); if(!m) return;
+  if(typeof window.jspdf==='undefined'){ toast('Biblioteca PDF não carregou. Recarregue a página.','error'); return; }
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const pageW=doc.internal.pageSize.getWidth();
+  const dataHoje=new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const usuario=CURRENT_USER?CURRENT_USER.nome:'Sistema';
+  doc.setFillColor(74,143,245); doc.rect(0,0,pageW,18,'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.text('STOCKOPS',10,11);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.text('Gestão de Estoque · Impressão Digital',10,16);
+  doc.text(dataHoje,pageW-10,11,{align:'right'}); doc.text('Gerado por: '+usuario,pageW-10,16,{align:'right'});
+  doc.setTextColor(30,30,30); doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Máquina: '+(m.nome||''),10,28);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,100,100);
+  doc.text(`${m.modelo||'—'}  ·  criada em ${m.criadoEm||'—'}`,10,34);
+  const arr=(m.tintas||[]).map(t=> typeof t==='string'?{modelo:t}:t);
+  const ordered=[...arr.filter(t=>!t.fim), ...arr.filter(t=>t.fim)];
+  const tintasRows=ordered.map(t=>{ const d=_duracaoDias(t.inicio,t.fim); return [t.modelo||'—', _fmtData(t.inicio), _fmtData(t.validade), _fmtData(t.fim), t.fim?(d!=null?d+' dias':'—'):'em uso']; });
+  doc.autoTable({ head:[['Tinta','Instalada','Validade','Acabou em','Duração / status']], body: tintasRows.length?tintasRows:[['—','—','—','—','sem tintas']], startY:40, theme:'striped', styles:{fontSize:8,cellPadding:2}, headStyles:{fillColor:[74,143,245],textColor:255,fontStyle:'bold'}, alternateRowStyles:{fillColor:[245,247,250]}, margin:{left:10,right:10} });
+  let y=doc.lastAutoTable.finalY+8;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(30,30,30); doc.text('Histórico',10,y);
+  const hist=[...(m.historico||[])].sort((a,b)=>(b.tsMs||0)-(a.tsMs||0));
+  const histRows=hist.map(h=>[h.ts||'—', h.user||'—', h.acao||'', h.detalhe||'']);
+  doc.autoTable({ head:[['Data','Usuário','Ação','Detalhe']], body: histRows.length?histRows:[['—','—','sem histórico','']], startY:y+3, theme:'striped', styles:{fontSize:8,cellPadding:2}, headStyles:{fillColor:[74,143,245],textColor:255,fontStyle:'bold'}, alternateRowStyles:{fillColor:[245,247,250]}, margin:{left:10,right:10} });
+  const totalPag=doc.internal.getNumberOfPages();
+  for(let i=1;i<=totalPag;i++){ doc.setPage(i); doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(150,150,150); const pageH=doc.internal.pageSize.getHeight(); doc.text(`Página ${i} de ${totalPag}`,pageW/2,pageH-6,{align:'center'}); doc.text('StockOps · Sistema de Gestão',10,pageH-6); doc.text('Confidencial',pageW-10,pageH-6,{align:'right'}); }
+  const nomeArq=`stockops_maquina_${(m.nome||'').toLowerCase().replace(/[^a-z0-9]+/gi,'_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+  doc.save(nomeArq);
+  registrarAudit('sistema',`PDF de máquina exportado: ${m.nome}`,`${ordered.length} tintas · ${hist.length} eventos`,'📄');
+  toast('PDF da máquina gerado!','success');
 }
 
 function excluirMaquina(id){
